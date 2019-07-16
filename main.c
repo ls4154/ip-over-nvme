@@ -71,7 +71,7 @@ void *nvme_to_ip(void *arg)
 	buf = malloc(BUFSIZE);
 
 	tv.tv_sec = 0;
-	tv.tv_nsec = 100000;
+	tv.tv_nsec = 1000000;
 
 	while (1) {
 		/* read from nvme */
@@ -101,8 +101,12 @@ void *nvme_to_ip(void *arg)
 		nwrite = write(tun_fd, buf, len);
 		if (nwrite < len) {
 			fprintf(stderr, "n2i : write error\n");
+			goto loop_sleep;
 		}
 		printf("n2i : write %d bytes to tun\n", nwrite);
+		for (int i = 0; i < nwrite; i+=17)
+			printf("%2x", *(unsigned char *)(buf + i));
+		puts("");
 
 loop_sleep:
 		nanosleep(&tv, NULL);
@@ -157,6 +161,9 @@ void ip_to_nvme()
 			continue;
 		}
 		printf("i2n : write %d bytes to nvme\n", nread);
+		for (int i = 0; i < nread; i+=17)
+			printf("%2x", *(unsigned char *)(buf + i));
+		puts("");
 	}
 }
 
