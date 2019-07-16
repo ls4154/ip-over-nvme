@@ -2,14 +2,34 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
+#include <sys/ioctl.h>
 #include <linux/nvme_ioctl.h>
+#include "tun.h"
+#include "ip.h"
 
 #define BUFSIZE 4096
+
+enum nvme_opcode {
+	nvme_cmd_flush		= 0x00,
+	nvme_cmd_write		= 0x01,
+	nvme_cmd_read		= 0x02,
+	nvme_cmd_write_uncor	= 0x04,
+	nvme_cmd_compare	= 0x05,
+	nvme_cmd_write_zeroes	= 0x08,
+	nvme_cmd_dsm		= 0x09,
+	nvme_cmd_resv_register	= 0x0d,
+	nvme_cmd_resv_report	= 0x0e,
+	nvme_cmd_resv_acquire	= 0x11,
+	nvme_cmd_resv_release	= 0x15,
+};
 
 static int tun_fd;
 static char tun_name[IFNAMSIZ] = {'\0'};
@@ -30,29 +50,58 @@ void *nvme_to_ip(void *arg)
 	int len;
 	int nwrite;
 	char *buf;
-	struct nvme_user_io io;
+	struct nvme_user_io io = {
+		.opcode = nvme_cmd_read,
+		.flags		= 0,
+		.control	= 0,
+		.nblocks	= 1,
+		.rsvd		= 0,
+		.metadata	= 0,
+		.addr		= 0,
+		.slba		= 9223372036854775807L,
+		.dsmgmt		= 0,
+		.reftag		= 0,
+		.appmask	= 0,
+		.apptag		= 0,
+	};
 	struct timespec tv;
+	struct ip_hdr *iphdr;
 
 	buf = malloc(BUFSIZE);
 
-	tv.tv_sec = 1;
-	tv.tv_nsec = 0;
+	tv.tv_sec = 0;
+	tv.tv_nsec = 10 * 1000000;
 
 	while (1) {
 		/* read from nvme */
-		rc = ioctl(fd, NVME_IOCTL_SUBMIT_IO, &io);
+		io.addr = (uintptr_t)buf;
+		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
 		if (rc != 0) {
-			fprintf(stderr, "nothing to read\n");
+			/* fprintf(stderr, "nothing to read (%d)\n", rc); */
+			goto loop_sleep;
+		}
+		printf("read from nvme\n");
+
+		/* check length and format */
+		iphdr = (void *)buf;
+		len = ntohs(iphdr->len);
+
+		if (len <= 20) {
+			fprintf(stderr, "wrong ip format\n");
 			goto loop_sleep;
 		}
 
-		/* check length */
+		if (iphdr->version != IPV4) {
+			fprintf(stderr, "not IPV4\n");
+			goto loop_sleep;
+		}
 
 		/* write to tun */
 		nwrite = write(tun_fd, buf, len);
 		if (nwrite < len) {
 			fprintf(stderr, "write error\n");
 		}
+		printf("write %d bytes to nvme\n", nwrite);
 
 loop_sleep:
 		nanosleep(&tv, NULL);
@@ -65,15 +114,11 @@ void ip_to_nvme()
 	int rc;
 	int nread;
 	char *buf;
-	struct nvme_user_io io;
-
-	buf = malloc(BUFSIZE);
-
-	io = {
+	struct nvme_user_io io = {
 		.opcode = nvme_cmd_write,
 		.flags		= 0,
 		.control	= 0,
-		.nblocks	= 7,
+		.nblocks	= 0,
 		.rsvd		= 0,
 		.metadata	= 0,
 		.addr		= 0,
@@ -83,6 +128,8 @@ void ip_to_nvme()
 		.appmask	= 0,
 		.apptag		= 0,
 	};
+
+	buf = malloc(BUFSIZE);
 
 	while (1) {
 		/* read from tun */
@@ -97,7 +144,7 @@ void ip_to_nvme()
 		/* check IPV4 */
 
 		/* write to nvme */
-		io.nblocks = 10;
+		io.nblocks = nread;
 		io.addr = (uintptr_t)buf;
 
 		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
@@ -110,11 +157,11 @@ void ip_to_nvme()
 
 int main(int argc, char **argv)
 {
-	int nread;
 	pthread_t tid;
 
 	signal(SIGINT, sigint_hadler);
 
+	/* allocate tun device */
 	strcpy(tun_name, "tun77");
 
 	tun_fd = tun_alloc(tun_name, IFF_TUN | IFF_NO_PI);
@@ -125,7 +172,14 @@ int main(int argc, char **argv)
 
 	printf("TUN device : %s\n", tun_name);
 
-	if (pthread_create(&tid, NULL, &thread_main, NULL) != 0) {
+	/* open nvme device */
+	nvme_fd = open(nvme_dev, O_RDONLY);
+	if (nvme_fd < 0) {
+		fprintf(stderr, "nvme open error\n");
+		exit(1);
+	}
+
+	if (pthread_create(&tid, NULL, &nvme_to_ip, NULL) != 0) {
 		fprintf(stderr, "pthread create error\n");
 		exit(1);
 	}
