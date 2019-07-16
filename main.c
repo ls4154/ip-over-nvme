@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
 #include <time.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
@@ -15,7 +16,7 @@
 #include "tun.h"
 #include "ip.h"
 
-#define BUFSIZE 4096
+#define BUFSIZE (4096 + 10)
 
 enum nvme_opcode {
 	nvme_cmd_flush		= 0x00,
@@ -70,38 +71,38 @@ void *nvme_to_ip(void *arg)
 	buf = malloc(BUFSIZE);
 
 	tv.tv_sec = 0;
-	tv.tv_nsec = 10 * 1000000;
+	tv.tv_nsec = 100000;
 
 	while (1) {
 		/* read from nvme */
 		io.addr = (uintptr_t)buf;
 		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
 		if (rc != 0) {
-			/* fprintf(stderr, "nothing to read (%d)\n", rc); */
+			/* fprintf(stderr, "n2i : nothing to read (%d)\n", rc); */
 			goto loop_sleep;
 		}
-		printf("read from nvme\n");
+		printf("n2i : read from nvme\n");
 
 		/* check length and format */
 		iphdr = (void *)buf;
 		len = ntohs(iphdr->len);
 
 		if (len <= 20) {
-			fprintf(stderr, "wrong ip format\n");
+			fprintf(stderr, "n2i : wrong ip format\n");
 			goto loop_sleep;
 		}
 
 		if (iphdr->version != IPV4) {
-			fprintf(stderr, "not IPV4\n");
+			fprintf(stderr, "n2i : not IPV4\n");
 			goto loop_sleep;
 		}
 
 		/* write to tun */
 		nwrite = write(tun_fd, buf, len);
 		if (nwrite < len) {
-			fprintf(stderr, "write error\n");
+			fprintf(stderr, "n2i : write error\n");
 		}
-		printf("write %d bytes to nvme\n", nwrite);
+		printf("n2i : write %d bytes to tun\n", nwrite);
 
 loop_sleep:
 		nanosleep(&tv, NULL);
@@ -118,7 +119,7 @@ void ip_to_nvme()
 		.opcode = nvme_cmd_write,
 		.flags		= 0,
 		.control	= 0,
-		.nblocks	= 0,
+		.nblocks	= 1,
 		.rsvd		= 0,
 		.metadata	= 0,
 		.addr		= 0,
@@ -135,23 +136,27 @@ void ip_to_nvme()
 		/* read from tun */
 		nread = read(tun_fd, buf, BUFSIZE);
 		if (nread < 0) {
-			fprintf(stderr, "read error\n");
+			fprintf(stderr, "i2n : read error\n");
 			close(tun_fd);
 			exit(1);
 		}
-		printf("read %d bytes from tun\n", nread);
+		printf("i2n : read %d bytes from tun\n", nread);
 
 		/* check IPV4 */
 
 		/* write to nvme */
-		io.nblocks = nread;
+		io.nblocks = 1;
 		io.addr = (uintptr_t)buf;
 
 		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
 		if (rc != 0) {
-			fprintf(stderr, "ioctl error\n");
+			if (rc < 0)
+				fprintf(stderr, "i2n : ioctl errorno %s\n", strerror(errno));
+			else 
+				fprintf(stderr, "i2n : ioctl error (%d)\n", rc);
+			continue;
 		}
-		printf("write %d bytes to nvme\n", nread);
+		printf("i2n : write %d bytes to nvme\n", nread);
 	}
 }
 
