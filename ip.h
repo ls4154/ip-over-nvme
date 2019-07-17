@@ -2,6 +2,9 @@
 /* <linux/in.h> */
 /* <linux/ip.h> */
 
+#ifndef IP_H
+#define IP_H
+
 #include <stdint.h>
 
 /* IP version */
@@ -27,3 +30,6 @@ struct ip_hdr {
 	uint8_t data[];
 } __attribute__((packed));
 
+int ip_addr(const char *name, const char *addr, const char *netmask);
+
+#endif

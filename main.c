@@ -38,7 +38,7 @@ static char tun_name[IFNAMSIZ] = {'\0'};
 static int nvme_fd;
 static char *nvme_dev = "/dev/nvme0n1";
 
-void sigint_hadler()
+void sigint_hadler(int signo)
 {
 	if (tun_fd >= 0)
 		close(tun_fd);
@@ -77,10 +77,9 @@ void *nvme_to_ip(void *arg)
 		/* read from nvme */
 		io.addr = (uintptr_t)buf;
 		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
-		if (rc != 0) {
-			/* fprintf(stderr, "n2i : nothing to read (%d)\n", rc); */
+		if (rc != 0)
 			goto loop_sleep;
-		}
+
 		printf("n2i : read from nvme\n");
 
 		/* check length and format */
@@ -104,9 +103,6 @@ void *nvme_to_ip(void *arg)
 			goto loop_sleep;
 		}
 		printf("n2i : write %d bytes to tun\n", nwrite);
-		for (int i = 0; i < nwrite; i += 19)
-			printf("%2x", *(unsigned char *)(buf + i));
-		puts("");
 
 loop_sleep:
 		nanosleep(&tv, NULL);
@@ -149,33 +145,45 @@ void ip_to_nvme()
 		/* check IPV4 */
 
 		/* write to nvme */
-		/* io.nblocks = nread; */
 		io.addr = (uintptr_t)buf;
 
 		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
 		if (rc != 0) {
 			if (rc < 0)
 				fprintf(stderr, "i2n : ioctl errorno %s\n", strerror(errno));
-			else 
+			else
 				fprintf(stderr, "i2n : ioctl error (%d)\n", rc);
 			continue;
 		}
 		printf("i2n : write %d bytes to nvme\n", nread);
-		for (int i = 0; i < nread; i += 19)
-			printf("%2x", *(unsigned char *)(buf + i));
-		puts("");
 	}
 }
 
 int main(int argc, char **argv)
 {
+	int opt;
 	pthread_t tid;
+	char addr[16] = {'\0'};
+	char netmask[16] = {'\0'};
 
 	signal(SIGINT, sigint_hadler);
 
-	/* allocate tun device */
-	strcpy(tun_name, "tun77");
+	while ((opt = getopt(argc, argv, "t:i:h")) != -1) {
+		switch (opt) {
+		case 't':
+			strncpy(tun_name, optarg, IFNAMSIZ - 1);
+			break;
+		case 'i':
+			strncpy(addr, optarg, 15);
+			strcpy(netmask, "255.255.255.0");
+			break;
+		case 'h':
+		default:
+			goto usage;
+		}
+	}
 
+	/* allocate tun device */
 	tun_fd = tun_alloc(tun_name, IFF_TUN | IFF_NO_PI);
 	if (tun_fd < 0) {
 		fprintf(stderr, "tun allocation failed\n");
@@ -183,6 +191,12 @@ int main(int argc, char **argv)
 	}
 
 	printf("TUN device : %s\n", tun_name);
+
+	/* set ip address */
+	if (*addr != '\0' && ip_addr(tun_name, addr, netmask) < 0) {
+		fprintf(stderr, "ip addr set failed\n");
+		exit(1);
+	}
 
 	/* open nvme device */
 	nvme_fd = open(nvme_dev, O_RDONLY);
@@ -199,6 +213,12 @@ int main(int argc, char **argv)
 	ip_to_nvme();
 
 	return 0;
+usage:
+	fprintf(stderr, "Usage: %s [OPTION]\n", argv[0]);
+	fprintf(stderr, " -t <IF_NAME>	specify tun device name\n");
+	fprintf(stderr, " -i <ADDRESS>	set ip address\n");
+	fprintf(stderr, " -h		display this help info\n");
+	return 1;
 }
 
 /* vim: set ts=8 sw=8 noet: */

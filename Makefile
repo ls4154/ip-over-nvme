@@ -3,7 +3,7 @@
 CC = gcc
 CFLAGS = -Wall
 TARGET = ion
-OBJECTS = main.o tun.o
+OBJECTS = main.o tun.o ip.o
 
 $(TARGET) : $(OBJECTS)
 	$(CC) -o $(TARGET) $(OBJECTS) -lpthread
