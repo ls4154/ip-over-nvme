@@ -55,7 +55,7 @@ void *nvme_to_ip(void *arg)
 		.opcode = nvme_cmd_read,
 		.flags		= 0,
 		.control	= 0,
-		.nblocks	= 1,
+		.nblocks	= 2,
 		.rsvd		= 0,
 		.metadata	= 0,
 		.addr		= 0,
@@ -104,7 +104,7 @@ void *nvme_to_ip(void *arg)
 			goto loop_sleep;
 		}
 		printf("n2i : write %d bytes to tun\n", nwrite);
-		for (int i = 0; i < nwrite; i+=17)
+		for (int i = 0; i < nwrite; i += 19)
 			printf("%2x", *(unsigned char *)(buf + i));
 		puts("");
 
@@ -123,7 +123,7 @@ void ip_to_nvme()
 		.opcode = nvme_cmd_write,
 		.flags		= 0,
 		.control	= 0,
-		.nblocks	= 1,
+		.nblocks	= 2,
 		.rsvd		= 0,
 		.metadata	= 0,
 		.addr		= 0,
@@ -149,7 +149,7 @@ void ip_to_nvme()
 		/* check IPV4 */
 
 		/* write to nvme */
-		io.nblocks = 1;
+		/* io.nblocks = nread; */
 		io.addr = (uintptr_t)buf;
 
 		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
@@ -161,7 +161,7 @@ void ip_to_nvme()
 			continue;
 		}
 		printf("i2n : write %d bytes to nvme\n", nread);
-		for (int i = 0; i < nread; i+=17)
+		for (int i = 0; i < nread; i += 19)
 			printf("%2x", *(unsigned char *)(buf + i));
 		puts("");
 	}
