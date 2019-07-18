@@ -66,21 +66,27 @@ void *nvme_to_ip(void *arg)
 		.apptag		= 0,
 	};
 	struct timespec tv;
+	struct timespec tv2;
 	struct ip_hdr *iphdr;
 
 	buf = malloc(BUFSIZE);
 
 	tv.tv_sec = 0;
-	tv.tv_nsec = 1000000;
+	tv.tv_nsec = 10 * 1000; /* 10 us */
+
+	tv2.tv_sec = 0;
+	tv2.tv_nsec = 1000; /* 1 us */
 
 	while (1) {
 		/* read from nvme */
 		io.addr = (uintptr_t)buf;
 		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
-		if (rc != 0)
-			goto loop_sleep;
+		if (rc != 0) {
+			nanosleep(&tv, NULL);
+			continue;
+		}
 
-		printf("n2i : read from nvme\n");
+		/* printf("n2i : read from nvme\n"); */
 
 		/* check length and format */
 		iphdr = (void *)buf;
@@ -100,12 +106,10 @@ void *nvme_to_ip(void *arg)
 		nwrite = write(tun_fd, buf, len);
 		if (nwrite < len) {
 			fprintf(stderr, "n2i : write error\n");
-			goto loop_sleep;
 		}
-		printf("n2i : write %d bytes to tun\n", nwrite);
-
+		// printf("n2i : write %d bytes to tun\n", nwrite);
 loop_sleep:
-		nanosleep(&tv, NULL);
+		nanosleep(&tv2, NULL);
 	}
 	return NULL;
 }
@@ -140,7 +144,7 @@ void ip_to_nvme()
 			close(tun_fd);
 			exit(1);
 		}
-		printf("i2n : read %d bytes from tun\n", nread);
+		/* printf("i2n : read %d bytes from tun\n", nread); */
 
 		/* check IPV4 */
 
@@ -155,7 +159,7 @@ void ip_to_nvme()
 				fprintf(stderr, "i2n : ioctl error (%d)\n", rc);
 			continue;
 		}
-		printf("i2n : write %d bytes to nvme\n", nread);
+		// printf("i2n : write %d bytes to nvme\n", nread);
 	}
 }
 
