@@ -15,6 +15,7 @@
 #include <linux/nvme_ioctl.h>
 #include "tun.h"
 #include "ip.h"
+#include <sys/mman.h>
 
 #define BUFSIZE (4096 + 10)
 
@@ -69,7 +70,8 @@ void *nvme_to_ip(void *arg)
 	struct timespec tv2;
 	struct ip_hdr *iphdr;
 
-	buf = malloc(BUFSIZE);
+	buf = mmap(0, BUFSIZE,PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1,0);
+        mlock(buf,BUFSIZE);
 
 	tv.tv_sec = 0;
 	tv.tv_nsec = 10 * 1000; /* 10 us */
@@ -134,8 +136,9 @@ void ip_to_nvme()
 		.apptag		= 0,
 	};
 
-	buf = malloc(BUFSIZE);
-
+	buf = mmap(0, BUFSIZE,PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1,0);
+        mlock(buf,BUFSIZE);
+	
 	while (1) {
 		/* read from tun */
 		nread = read(tun_fd, buf, BUFSIZE);
