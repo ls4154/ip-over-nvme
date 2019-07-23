@@ -19,6 +19,10 @@
 
 #define BUFSIZE (4096 + 10)
 
+#define BLOCK_SIZE 512
+#define MTU_SIZE 3000
+#define NBLOCKS ((MTU_SIZE + BLOCK_SIZE) / BLOCK_SIZE)
+
 enum nvme_opcode {
 	nvme_cmd_flush		= 0x00,
 	nvme_cmd_write		= 0x01,
@@ -56,7 +60,7 @@ void *nvme_to_ip(void *arg)
 		.opcode = nvme_cmd_read,
 		.flags		= 0,
 		.control	= 0,
-		.nblocks	= 2,
+		.nblocks	= NBLOCKS,
 		.rsvd		= 0,
 		.metadata	= 0,
 		.addr		= 0,
@@ -70,8 +74,8 @@ void *nvme_to_ip(void *arg)
 	struct timespec tv2;
 	struct ip_hdr *iphdr;
 
-	buf = mmap(0, BUFSIZE,PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1,0);
-        mlock(buf,BUFSIZE);
+	buf = mmap(0, BUFSIZE, PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
+	mlock(buf, BUFSIZE);
 
 	tv.tv_sec = 0;
 	tv.tv_nsec = 10 * 1000; /* 10 us */
@@ -125,7 +129,7 @@ void ip_to_nvme()
 		.opcode = nvme_cmd_write,
 		.flags		= 0,
 		.control	= 0,
-		.nblocks	= 2,
+		.nblocks	= NBLOCKS,
 		.rsvd		= 0,
 		.metadata	= 0,
 		.addr		= 0,
@@ -136,9 +140,9 @@ void ip_to_nvme()
 		.apptag		= 0,
 	};
 
-	buf = mmap(0, BUFSIZE,PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1,0);
-        mlock(buf,BUFSIZE);
-	
+	buf = mmap(0, BUFSIZE, PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
+	mlock(buf, BUFSIZE);
+
 	while (1) {
 		/* read from tun */
 		nread = read(tun_fd, buf, BUFSIZE);
