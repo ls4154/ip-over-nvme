@@ -20,8 +20,8 @@
 #define BUFSIZE (4096 + 10)
 
 #define BLOCK_SIZE 512
-#define MTU_SIZE 3000
-#define NBLOCKS ((MTU_SIZE + BLOCK_SIZE) / BLOCK_SIZE)
+#define MTU_SIZE 1500
+#define NBLOCKS ((MTU_SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE) - 1
 
 enum nvme_opcode {
 	nvme_cmd_flush		= 0x00,
