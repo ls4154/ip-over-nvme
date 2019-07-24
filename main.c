@@ -3,7 +3,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
-#include <time.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <arpa/inet.h>
@@ -43,11 +42,11 @@ static char tun_name[IFNAMSIZ] = {'\0'};
 static int nvme_fd;
 static char *nvme_dev = "/dev/nvme0n1";
 
+static int th_exit = 0;
+
 void sigint_hadler(int signo)
 {
-	if (tun_fd >= 0)
-		close(tun_fd);
-	exit(0);
+	th_exit = 1;
 }
 
 void *nvme_to_ip(void *arg)
@@ -70,29 +69,19 @@ void *nvme_to_ip(void *arg)
 		.appmask	= 0,
 		.apptag		= 0,
 	};
-	struct timespec tv;
-	struct timespec tv2;
 	struct ip_hdr *iphdr;
 
 	buf = mmap(0, BUFSIZE, PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
 	mlock(buf, BUFSIZE);
 
-	tv.tv_sec = 0;
-	tv.tv_nsec = 10 * 1000; /* 10 us */
-
-	tv2.tv_sec = 0;
-	tv2.tv_nsec = 1000; /* 1 us */
-
-	while (1) {
+	while (!th_exit) {
 		/* read from nvme */
 		io.addr = (uintptr_t)buf;
 		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
 		if (rc != 0) {
-			nanosleep(&tv, NULL);
+			usleep(1);
 			continue;
 		}
-
-		/* printf("n2i : read from nvme\n"); */
 
 		/* check length and format */
 		iphdr = (void *)buf;
@@ -100,12 +89,12 @@ void *nvme_to_ip(void *arg)
 
 		if (len <= 20) {
 			fprintf(stderr, "n2i : wrong ip format\n");
-			goto loop_sleep;
+			continue;
 		}
 
 		if (iphdr->version != IPV4) {
 			fprintf(stderr, "n2i : not IPV4\n");
-			goto loop_sleep;
+			continue;
 		}
 
 		/* write to tun */
@@ -113,14 +102,11 @@ void *nvme_to_ip(void *arg)
 		if (nwrite < len) {
 			fprintf(stderr, "n2i : write error\n");
 		}
-		// printf("n2i : write %d bytes to tun\n", nwrite);
-loop_sleep:
-		nanosleep(&tv2, NULL);
 	}
 	return NULL;
 }
 
-void ip_to_nvme()
+void *ip_to_nvme(void *arg)
 {
 	int rc;
 	int nread;
@@ -143,18 +129,14 @@ void ip_to_nvme()
 	buf = mmap(0, BUFSIZE, PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
 	mlock(buf, BUFSIZE);
 
-	while (1) {
+	while (!th_exit) {
 		/* read from tun */
 		nread = read(tun_fd, buf, BUFSIZE);
 		if (nread < 0) {
 			fprintf(stderr, "i2n : read error\n");
 			close(tun_fd);
-			exit(1);
+			return NULL;
 		}
-		/* printf("i2n : read %d bytes from tun\n", nread); */
-
-		/* check IPV4 */
-
 		/* write to nvme */
 		io.addr = (uintptr_t)buf;
 
@@ -166,14 +148,14 @@ void ip_to_nvme()
 				fprintf(stderr, "i2n : ioctl error (%d)\n", rc);
 			continue;
 		}
-		// printf("i2n : write %d bytes to nvme\n", nread);
 	}
+	return NULL;
 }
 
 int main(int argc, char **argv)
 {
 	int opt;
-	pthread_t tid;
+	pthread_t tid, tid2;
 	char addr[16] = {'\0'};
 	char netmask[16] = {'\0'};
 
@@ -220,8 +202,16 @@ int main(int argc, char **argv)
 		fprintf(stderr, "pthread create error\n");
 		exit(1);
 	}
+	if (pthread_create(&tid2, NULL, &ip_to_nvme, NULL) != 0) {
+		fprintf(stderr, "pthread create error\n");
+		exit(1);
+	}
 
-	ip_to_nvme();
+	pthread_join(tid, NULL);
+	pthread_join(tid2, NULL);
+
+	close(tun_fd);
+	close(nvme_fd);
 
 	return 0;
 usage:
