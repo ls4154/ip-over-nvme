@@ -30,6 +30,8 @@ struct ip_hdr {
 	uint8_t data[];
 } __attribute__((packed));
 
-int ip_addr(const char *name, const char *addr, const char *netmask);
+int if_addr(const char *if_name, const char *src_addr, const char *netmask);
+int if_addr_p2p(const char *if_name, const char *src_addr, const char *dst_addr);
+int if_mtu(const char *if_name, int size);
 
 #endif
