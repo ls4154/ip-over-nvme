@@ -15,6 +15,36 @@
 #include "tun.h"
 #include "ip.h"
 #include <sys/mman.h>
+#include "dbg_macro.h"
+#include <sys/time.h>
+
+#define DBG_PRT(COND, ...) \
+    __CONDDEF(COND,fprintf(stderr,__VA_ARGS__);)
+
+#define DBG_PARAM_INITIALIZER(COND) \
+	__CONDDEF(COND,\
+	struct timeval start_time, end_time;\
+                long elap_sec, elap_usec;\
+    )
+
+#define DBG_EXEC_TIME(COND,FUNC) \
+    __CONDDEF(COND,\
+                gettimeofday(&start_time, NULL); \
+                FUNC;\
+                gettimeofday(&end_time, NULL); \
+                elap_sec = end_time.tv_sec - start_time.tv_sec;\
+                elap_usec = end_time.tv_usec - start_time.tv_usec;\
+                if(elap_usec < 0) {\
+                        elap_usec += 1000000;\
+                        elap_sec--;\
+                }\
+                fprintf(stderr, "%ld.%06ld ",elap_sec, elap_usec);\
+    )\
+    __CONDNDEF(COND,FUNC)
+
+#define DBG_NVME TRUE
+#define DBG_IP FALSE
+
 
 #define BUFSIZE (4096 + 10)
 
@@ -70,6 +100,7 @@ void *nvme_to_ip(void *arg)
 		.apptag		= 0,
 	};
 	struct ip_hdr *iphdr;
+	DBG_PARAM_INITIALIZER(DBG_NVME);
 
 	buf = mmap(0, BUFSIZE, PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
 	mlock(buf, BUFSIZE);
@@ -77,11 +108,14 @@ void *nvme_to_ip(void *arg)
 	while (!th_exit) {
 		/* read from nvme */
 		io.addr = (uintptr_t)buf;
-		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
-		if (rc != 0) {
-			usleep(1);
-			continue;
-		}
+		DBG_EXEC_TIME(DBG_NVME,
+			rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
+			if (rc != 0) {
+				usleep(1);
+				continue;
+			}
+			DBG_PRT(DBG_NVME, "%s:",__func__);
+		);
 
 		/* check length and format */
 		iphdr = (void *)buf;
@@ -98,7 +132,11 @@ void *nvme_to_ip(void *arg)
 		}
 
 		/* write to tun */
-		nwrite = write(tun_fd, buf, len);
+		DBG_EXEC_TIME(DBG_NVME,
+			nwrite = write(tun_fd, buf, len);
+		);
+		DBG_PRT(DBG_NVME, "\n");
+		
 		if (nwrite < len) {
 			fprintf(stderr, "n2i : write error\n");
 		}
@@ -125,13 +163,18 @@ void *ip_to_nvme(void *arg)
 		.appmask	= 0,
 		.apptag		= 0,
 	};
+	DBG_PARAM_INITIALIZER(DBG_IP);
 
 	buf = mmap(0, BUFSIZE, PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE|MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
 	mlock(buf, BUFSIZE);
 
 	while (!th_exit) {
 		/* read from tun */
-		nread = read(tun_fd, buf, BUFSIZE);
+		DBG_PRT(DBG_IP, "%s:",__func__);
+
+		DBG_EXEC_TIME(DBG_IP,
+			nread = read(tun_fd, buf, BUFSIZE);
+		);
 		if (nread < 0) {
 			fprintf(stderr, "i2n : read error\n");
 			close(tun_fd);
@@ -139,8 +182,11 @@ void *ip_to_nvme(void *arg)
 		}
 		/* write to nvme */
 		io.addr = (uintptr_t)buf;
-
-		rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
+		DBG_EXEC_TIME(DBG_IP,
+			rc = ioctl(nvme_fd, NVME_IOCTL_SUBMIT_IO, &io);
+		);
+		
+		DBG_PRT(DBG_IP, "\n");
 		if (rc != 0) {
 			if (rc < 0)
 				fprintf(stderr, "i2n : ioctl errorno %s\n", strerror(errno));
